@@ -1,15 +1,13 @@
 import express from "express";
 import multer from "multer";
-import { createRequire } from 'module';
-const require = createRequire(import.meta.url);
-
-import fs from 'fs';
-import OpenAI from 'openai';
-const pdf = require('pdf-parse');
-import path from 'path';
+import * as pdf from "pdf-parse";
+import fs from "fs";
+import path from "path";
 import { fileURLToPath } from "url";
 import { addCandidate, getCandidate, getAllCandidates, updateCandidate } from "../utils/airtableClient.js";
 import { parseResumeEnhanced } from "../utils/enhancedPdfParser.js";
+import { parseResumeRobust } from "../utils/robustPdfParser.js";
+import { parseResumeUniversal } from "../utils/universalPdfParser.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -422,16 +420,34 @@ router.post("/upload", upload.single("resume"), async (req, res) => {
     let parsingMethod = '';
 
     try {
-      console.log('Attempting enhanced resume parsing...');
+      console.log('Attempting universal resume parsing...');
       
-      // Use the enhanced parser with AI capabilities
-      parsedData = await parseResumeEnhanced(filePath);
-      parsingMethod = 'Enhanced Parser';
-      console.log('Enhanced parsing successful:', parsedData);
+      // Use the universal parser with multiple strategies and AI capabilities
+      parsedData = await parseResumeUniversal(filePath);
+      parsingMethod = parsedData.parsingMethod || 'Universal Parser';
+      console.log('Universal parsing successful:', parsedData);
       
-    } catch (enhancedError) {
-      console.error('Enhanced parsing failed:', enhancedError);
-      throw new Error('Failed to parse resume with enhanced parser');
+    } catch (universalError) {
+      console.error('Universal parsing failed, trying robust parser:', universalError);
+      
+      try {
+        // Fallback to robust parser
+        parsedData = await parseResumeRobust(filePath);
+        parsingMethod = parsedData.parsingMethod || 'Robust Parser (Fallback)';
+        console.log('Robust parsing successful:', parsedData);
+      } catch (robustError) {
+        console.error('Robust parsing also failed, trying enhanced parser:', robustError);
+        
+        try {
+          // Final fallback to enhanced parser
+          parsedData = await parseResumeEnhanced(filePath);
+          parsingMethod = 'Enhanced Parser (Final Fallback)';
+          console.log('Enhanced parsing successful:', parsedData);
+        } catch (enhancedError) {
+          console.error('All parsing methods failed:', enhancedError);
+          throw new Error('Failed to parse resume with all available parsers');
+        }
+      }
     }
     
     // Extract numeric value from salary for Expected Salary field (Number type)

@@ -1,4 +1,4 @@
-import pdf from 'pdf-parse';
+import * as pdf from 'pdf-parse';
 import fs from 'fs';
 
 // Simple and effective resume parser that works with any format
@@ -8,7 +8,7 @@ const parseResumeSimple = async (pdfPath) => {
     
     // Extract text from PDF
     const dataBuffer = fs.readFileSync(pdfPath);
-    const pdfData = await pdf(dataBuffer);
+    const pdfData = await new pdf.PDFParse(dataBuffer);
     const extractedText = pdfData.text;
     
     console.log('Extracted text length:', extractedText.length);

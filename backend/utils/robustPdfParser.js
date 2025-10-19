@@ -1,185 +1,312 @@
-import pdf from 'pdf-poppler';
+import * as pdf from 'pdf-parse';
+import pdf2pic from 'pdf2pic';
 import fs from 'fs';
-import path from 'path';
-import { fileURLToPath } from 'url';
+import OpenAI from 'openai';
+import dotenv from 'dotenv';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+// Load environment variables
+dotenv.config();
 
-// Convert PDF to images and use OCR-like text extraction
-const convertPdfToImages = async (pdfPath) => {
+// Initialize OpenAI client
+let openai = null;
+if (process.env.OPEN_AI_KEY) {
+  openai = new OpenAI({
+    apiKey: process.env.OPEN_AI_KEY
+  });
+  console.log('OpenAI client initialized');
+} else {
+  console.log('OpenAI API key not found, using text-based parsing only');
+}
+
+// Robust PDF parser with multiple strategies
+const parseResumeRobust = async (pdfPath) => {
   try {
-    const options = {
-      format: 'png',
-      out_dir: path.join(__dirname, '../temp'),
-      out_prefix: 'page',
-      page: null // Convert all pages
+    console.log('Starting robust resume parsing...');
+    
+    let extractedText = '';
+    let parsingMethod = '';
+    
+    // Strategy 1: Try pdf-parse first (fastest)
+    try {
+      console.log('Attempting pdf-parse extraction...');
+      const dataBuffer = fs.readFileSync(pdfPath);
+      const pdfData = await new pdf.PDFParse(dataBuffer);
+      extractedText = pdfData.text || '';
+      parsingMethod = 'pdf-parse';
+      console.log(`pdf-parse extracted ${extractedText.length} characters`);
+    } catch (error) {
+      console.log('pdf-parse failed:', error.message);
+    }
+    
+    // Strategy 2: If pdf-parse failed or extracted very little text, try image-based parsing
+    if (!extractedText || extractedText.trim().length < 50) {
+      try {
+        console.log('Attempting image-based extraction with OpenAI Vision...');
+        const imageBasedText = await extractTextFromPdfImages(pdfPath);
+        if (imageBasedText && imageBasedText.trim().length > extractedText.length) {
+          extractedText = imageBasedText;
+          parsingMethod = 'OpenAI Vision';
+          console.log(`OpenAI Vision extracted ${extractedText.length} characters`);
+        }
+      } catch (error) {
+        console.log('Image-based extraction failed:', error.message);
+      }
+    }
+    
+    // Strategy 3: If still no text, try alternative text extraction
+    if (!extractedText || extractedText.trim().length < 10) {
+      try {
+        console.log('Attempting alternative text extraction...');
+        const alternativeText = await extractTextAlternative(pdfPath);
+        if (alternativeText && alternativeText.trim().length > 0) {
+          extractedText = alternativeText;
+          parsingMethod = 'Alternative';
+          console.log(`Alternative extraction found ${extractedText.length} characters`);
+        }
+      } catch (error) {
+        console.log('Alternative extraction failed:', error.message);
+      }
+    }
+    
+    console.log(`Final extraction method: ${parsingMethod}, text length: ${extractedText.length}`);
+    
+    if (!extractedText || extractedText.trim().length < 10) {
+      console.log('No text extracted from any method, using fallback data...');
+      return getFallbackData();
+    }
+    
+    // Use AI to enhance the parsing if OpenAI is available
+    if (openai && extractedText.length > 50) {
+      try {
+        console.log('Using AI to enhance parsing...');
+        const aiEnhancedData = await enhanceWithAI(extractedText);
+        return {
+          ...aiEnhancedData,
+          parsingMethod: `${parsingMethod} + AI Enhancement`
+        };
+      } catch (aiError) {
+        console.log('AI enhancement failed, using text parsing:', aiError.message);
+      }
+    }
+    
+    // Fallback to intelligent text parsing
+    const parsedData = parseTextIntelligently(extractedText);
+    return {
+      ...parsedData,
+      parsingMethod: parsingMethod
     };
+    
+  } catch (error) {
+    console.error('Error in robust resume parsing:', error);
+    return getFallbackData();
+  }
+};
 
-    console.log('Converting PDF to images with pdf-poppler...');
-    const results = await pdf.convert(pdfPath, options);
+// Extract text from PDF using image conversion and OpenAI Vision
+const extractTextFromPdfImages = async (pdfPath) => {
+  if (!openai) {
+    throw new Error('OpenAI not available for image processing');
+  }
+  
+  try {
+    // Convert PDF to images
+    const convert = pdf2pic.fromPath(pdfPath, {
+      density: 200, // Higher density for better text recognition
+      saveFilename: "page",
+      savePath: "./temp",
+      format: "png",
+      width: 2000,
+      height: 2000
+    });
+    
+    const results = await convert.bulk(-1); // Convert all pages
+    console.log(`Converted PDF to ${results.length} images`);
     
     if (!results || results.length === 0) {
       throw new Error('No images generated from PDF');
     }
 
-    console.log(`Generated ${results.length} images`);
-    return results.length; // Return number of pages
+    let allText = '';
+    
+    // Process each page with OpenAI Vision
+    for (let i = 0; i < Math.min(results.length, 3); i++) { // Limit to first 3 pages
+      try {
+        const imagePath = results[i].path;
+        const imageBuffer = fs.readFileSync(imagePath);
+        const base64Image = imageBuffer.toString('base64');
+        
+        const response = await openai.chat.completions.create({
+          model: "gpt-4o",
+          messages: [
+            {
+              role: "user",
+              content: [
+                {
+                  type: "text",
+                  text: "Extract all text from this resume image. Return only the raw text content, no formatting or JSON. Include all information: name, contact details, experience, skills, education, etc."
+                },
+                {
+                  type: "image_url",
+                  image_url: {
+                    url: `data:image/png;base64,${base64Image}`
+                  }
+                }
+              ]
+            }
+          ],
+          max_tokens: 2000,
+          temperature: 0.1
+        });
+        
+        const pageText = response.choices[0].message.content;
+        allText += pageText + '\n\n';
+        
+        // Clean up the image file
+        fs.unlinkSync(imagePath);
+        
+      } catch (pageError) {
+        console.error(`Error processing page ${i + 1}:`, pageError.message);
+      }
+    }
+    
+    return allText.trim();
+    
   } catch (error) {
-    console.error('Error converting PDF to images:', error);
+    console.error('Error in image-based extraction:', error);
     throw error;
   }
 };
 
-// Enhanced text extraction from PDF using multiple methods
-const extractTextFromPdf = async (pdfPath) => {
+// Alternative text extraction method
+const extractTextAlternative = async (pdfPath) => {
   try {
-    console.log('Attempting robust PDF text extraction...');
-    
-    // Method 1: Try pdf-parse first
-    try {
-      const pdfParse = await import('pdf-parse');
+    // Try reading the PDF as binary and looking for text patterns
       const dataBuffer = fs.readFileSync(pdfPath);
-      const pdfData = await pdfParse.default(dataBuffer);
-      const text = pdfData.text;
-      
-      if (text && text.trim().length > 50) {
-        console.log('pdf-parse successful, extracted text length:', text.length);
-        return text;
-      } else {
-        console.log('pdf-parse failed, text too short:', text.length);
-      }
-    } catch (error) {
-      console.log('pdf-parse failed:', error.message);
+    const text = dataBuffer.toString('utf8');
+    
+    // Look for common text patterns in PDFs
+    const textMatches = text.match(/[A-Za-z0-9\s@.,\-+()]{10,}/g);
+    if (textMatches && textMatches.length > 0) {
+      return textMatches.join(' ').substring(0, 5000); // Limit to first 5000 chars
     }
     
-    // Method 2: Convert to images and use AI for text extraction
-    try {
-      console.log('Trying AI-based text extraction...');
-      const numPages = await convertPdfToImages(pdfPath);
-      
-      // For now, return a placeholder that indicates we need AI processing
-      return `AI_PROCESSING_NEEDED:${numPages}`;
-    } catch (error) {
-      console.log('Image conversion failed:', error.message);
-    }
-    
-    // Method 3: Fallback - return empty string
-    console.log('All PDF parsing methods failed');
     return '';
-    
   } catch (error) {
-    console.error('Error in PDF text extraction:', error);
+    console.error('Alternative extraction error:', error);
     return '';
   }
 };
 
-// Enhanced parsing specifically for Steven's resume
-const parseStevenResume = () => {
-  console.log('Using Steven-specific resume parsing...');
-  
-  // Based on the resume image description, we know the structure
-  return {
-    name: 'Steven Soricillo',
-    email: 'ssoricillo54@gmail.com',
-    phone: '(609) 591-4306',
-    location: 'Monroe, NJ 08831',
-    summary: 'Highly accomplished Business Development Professional providing strategic vision and experience to accelerate growth, territory management, and to strengthen the overall performance of a global operation. Demonstrated expertise in all aspects of ocean/air import and export cargo sales with broad experience that encompasses freight forwarding, Transpacific, sales and marketing, and supply chain management.',
-    areasOfExpertise: 'Territory Management, Customs Clearance Sales, Management, Business Development, International Sales Marketing, Strategic Growth Planning, Partnership Development, Import and Export, Pricing Negotiations, Contract Negotiations, Supply Chain, Problem Resolution, Fluent Italian/Spanish',
-    qualifications: 'Committed to engaging with customers to elicit business needs, analyze organizational processes, and translate objectives into highly resilient, scalable solutions. Expertise analyzing business drivers, aligning metrics, and developing growth strategies to enable organizations to meet the needs of clients operating in a global economy. Ambitious individual with an entrepreneurial ethos and consistent stellar performance who is regarded as a key asset to organizational success.',
-    experience: `DeWell Container Shipping, Inc | Rosedale, NY (2016-Present)
-Business Development Manager
-Successfully managed global customer relationships, while building strategic partnerships with existing clients. Strategically established new partnerships with businesses in need of customized logistics solutions. Furthered the growth of new business revenue and cultivated the organic growth of existing accounts, while securing new contracts.
-
-Key Achievements:
-• Successfully managed a portfolio of key accounts that supported business strategic and regional plans through territory development plans
-• Increased company's revenue to $30k quarterly by developing relationship with key clients in India and China
-• Effectively communicated solutions to sales barriers, and provided prospect proposals to senior executives and the sales management team
-• Skillfully targeted high-volume accounts in specific market sectors that focused on transpacific markets in China, India, and the US
-• Developed accounts and grew revenue by increasing import services to clients in the New York/New Jersey region, which resulted in adding an average of 100 containers a month in business
-
-Independent Consultant | New York, NY (2012-2016)
-Account Executive
-Generated revenue growth by imports and exports through trade leads and analyzing new markets trends. Created strategic initiatives to secure accounts. Sold imports and exports to Brazil, India, and China markets.
-
-Key Achievements:
-• Secured major accounts with Xerox and Merck Pharmaceuticals and negotiated pricing with service providers to pass cost saving to clients`,
-    skills: 'Business Development, Key Account Management, Revenue Growth, Market Analysis, Import/Export Sales, Strategic Growth Planning, Partnership Development, Pricing Negotiations, Contract Negotiations, Problem Resolution, Territory Management, Customs Clearance Sales, International Sales Marketing, Supply Chain Management, Freight Forwarding, Transpacific Markets, Client Acquisition, Revenue Generation, Pipeline Management, Customer Relations, Lead Generation, CRM, Negotiation, Presentation, Public Speaking, Market Research',
-    education: '',
-    languages: 'Italian, Spanish',
-    currentJobTitle: 'Business Development Manager',
-    yearsOfExperience: '8+ years',
-    linkedinUrl: '',
-    expectedSalary: '',
-    resumeText: 'Steven Soricillo Resume - Business Development Professional'
-  };
-};
-
-// Main parsing function with fallback
-const parseResumeRobust = async (pdfPath) => {
+// AI enhancement using OpenAI
+const enhanceWithAI = async (text) => {
   try {
-    console.log('Starting robust PDF parsing...');
-    
-    // First, try to extract text from PDF
-    const extractedText = await extractTextFromPdf(pdfPath);
-    
-    if (extractedText && extractedText.trim().length > 50) {
-      console.log('Using extracted text for parsing...');
-      // Use the enhanced fallback parsing with the extracted text
-      return await parseWithEnhancedFallback(extractedText);
-    } else if (extractedText && extractedText.startsWith('AI_PROCESSING_NEEDED:')) {
-      console.log('PDF requires AI processing, but falling back to Steven-specific parsing...');
-      // For now, use Steven-specific parsing as fallback
-      return parseStevenResume();
-    } else {
-      console.log('No text extracted, using Steven-specific parsing...');
-      // Use Steven-specific parsing as last resort
-      return parseStevenResume();
+    const prompt = `
+    You are an expert resume parser. Analyze the following resume text and extract ALL available information in JSON format.
+    Be extremely accurate and comprehensive. Extract information from ANY resume format or template.
+
+    Expected JSON format:
+    {
+      "name": "Full name of the candidate",
+      "email": "Email address",
+      "phone": "Phone number",
+      "location": "Location/Address (City, State, Country)",
+      "linkedinUrl": "LinkedIn profile URL if mentioned",
+      "summary": "Professional summary, objective, or profile statement",
+      "areasOfExpertise": "Areas of expertise, key skills, or specializations",
+      "qualifications": "Highlighted qualifications, certifications, or achievements",
+      "experience": "Complete professional experience including company names, job titles, dates, and detailed responsibilities",
+      "education": "Educational background including degrees, institutions, and dates",
+      "skills": "All technical and soft skills (comma-separated)",
+      "languages": "Languages spoken (e.g., 'English, Spanish, French')",
+      "currentJobTitle": "Current or most recent job title",
+      "yearsOfExperience": "Total years of relevant experience (e.g., '5 years')",
+      "expectedSalary": "Expected salary if mentioned"
     }
-    
+
+    IMPORTANT GUIDELINES:
+    1. **name**: Extract the full name exactly as it appears (convert ALL CAPS to proper case)
+    2. **email**: Find any email address in the resume
+    3. **phone**: Extract phone number in any format (+1, (555), etc.)
+    4. **location**: Extract city, state, country, or address
+    5. **linkedinUrl**: Find LinkedIn profile URL (add https:// if missing)
+    6. **summary**: Extract professional summary, objective, or profile statement
+    7. **areasOfExpertise**: Extract key skills, specializations, or areas of expertise
+    8. **qualifications**: Extract certifications, achievements, or highlighted qualifications
+    9. **experience**: Extract ALL work experience with company names, job titles, dates, and responsibilities
+    10. **education**: Extract degrees, institutions, graduation dates
+    11. **skills**: Extract ALL technical and soft skills mentioned anywhere in the resume
+    12. **languages**: Extract languages spoken or known
+    13. **currentJobTitle**: Extract the most recent or current job title
+    14. **yearsOfExperience**: Calculate or extract total years of experience
+    15. **expectedSalary**: Extract salary expectations if mentioned
+
+    EXTRACTION RULES:
+    - Look for information in ANY section or format
+    - Extract from headers, bullet points, paragraphs, tables
+    - Handle different layouts: single column, two column, creative formats
+    - Extract from any language or template
+    - If information is not available, use empty string ""
+    - Be thorough and extract everything visible
+    - Return ONLY valid JSON, no additional text
+
+    Resume text to analyze:
+    ${text}
+    `;
+
+    const response = await openai.chat.completions.create({
+      model: "gpt-4o",
+      messages: [
+        {
+          role: "user",
+          content: prompt
+        }
+      ],
+      max_tokens: 3000,
+      temperature: 0.1
+    });
+
+    const content = response.choices[0].message.content;
+    console.log('AI Response:', content.substring(0, 200) + '...');
+
+    // Parse JSON response
+    try {
+      const jsonMatch = content.match(/```json\n([\s\S]*?)\n```/);
+      let parsedData;
+      
+      if (jsonMatch && jsonMatch[1]) {
+        parsedData = JSON.parse(jsonMatch[1]);
+    } else {
+        // If no JSON block, try to parse the whole content as JSON
+        parsedData = JSON.parse(content);
+      }
+      
+      console.log('AI parsing successful');
+      return parsedData;
+    } catch (parseError) {
+      console.error('Error parsing AI JSON response:', parseError);
+      console.log('Raw AI content:', content);
+      throw parseError;
+    }
   } catch (error) {
-    console.error('Error in robust PDF parsing:', error);
-    // Fallback to Steven-specific parsing
-    return parseStevenResume();
+    console.error('Error in AI enhancement:', error);
+    throw error;
   }
 };
 
-// Enhanced fallback parsing (from previous implementation)
-const parseWithEnhancedFallback = (text) => {
-  console.log('Using enhanced fallback parsing...');
+// Intelligent text parsing for fallback
+const parseTextIntelligently = (text) => {
+  console.log('Using intelligent text parsing...');
   
   const lines = text.split('\n').map(line => line.trim()).filter(line => line);
   
-  // Enhanced name extraction
-  let name = '';
+  // Extract name - multiple strategies
+  const name = extractName(lines, text);
   
-  // Strategy 1: Look for all caps name at the beginning
-  if (lines.length > 0) {
-    const firstFewLines = lines.slice(0, 5);
-    for (const line of firstFewLines) {
-      if (/^[A-Z]+(?:\s+[A-Z]+){1,3}$/.test(line) && 
-          !['LINKEDIN', 'PROFILE', 'EMAIL', 'PHONE', 'ADDRESS', 'RESUME', 'CURRICULUM', 'VITAE', 'CONTACT', 'INFORMATION', 'BUSINESS', 'DEVELOPMENT', 'PROFESSIONAL', 'EXPERIENCE'].some(word => 
-            line.includes(word))) {
-        name = line.toLowerCase().replace(/\b\w/g, l => l.toUpperCase());
-        break;
-      }
-    }
-  }
-  
-  // Strategy 2: Look for name before email
-  if (!name) {
-    const nameBeforeEmailPattern = /([A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,3})\s*[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/;
-    const match = text.match(nameBeforeEmailPattern);
-    if (match && match[1]) {
-      name = match[1].trim();
-    }
-  }
-
-  // Enhanced email extraction
+  // Extract email
   const emailMatch = text.match(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/);
   const email = emailMatch ? emailMatch[0] : '';
 
-  // Enhanced phone extraction
+  // Extract phone
   const phoneRegex = /(\+?[\d\s\-\(\)\.]{7,})/g;
   const phoneMatches = text.match(phoneRegex);
   let phone = '';
@@ -195,73 +322,174 @@ const parseWithEnhancedFallback = (text) => {
     }
   }
 
-  // Enhanced location extraction
-  let location = '';
+  // Extract location
+  const location = extractLocation(text);
+  
+  // Extract experience
+  const experience = extractExperience(text);
+  
+  // Extract skills
+  const skills = extractSkills(text);
+  
+  // Extract summary
+  const summary = extractSummary(text);
+  
+  // Extract current job title
+  const currentJobTitle = extractCurrentJobTitle(text);
+  
+  // Extract years of experience
+  const yearsOfExperience = extractYearsOfExperience(text);
+  
+  // Extract LinkedIn URL
+  const linkedinMatch = text.match(/linkedin\.com\/in\/[a-zA-Z0-9\-_]+/i);
+  const linkedinUrl = linkedinMatch ? `https://${linkedinMatch[0]}` : '';
+  
+  return {
+    name: name.trim(),
+    email: email.trim(),
+    phone: phone.trim(),
+    skills: skills.trim(),
+    education: '',
+    experience: experience.trim(),
+    location: location.trim(),
+    linkedinUrl: linkedinUrl.trim(),
+    expectedSalary: '',
+    summary: summary.trim(),
+    areasOfExpertise: skills.trim(),
+    qualifications: '',
+    languages: '',
+    currentJobTitle: currentJobTitle.trim(),
+    yearsOfExperience: yearsOfExperience.trim(),
+    resumeText: text
+  };
+};
+
+// Extract name using multiple strategies
+const extractName = (lines, text) => {
+  // Strategy 1: Look for name patterns at the beginning
+  for (let i = 0; i < Math.min(10, lines.length); i++) {
+    const line = lines[i];
+    
+    // Pattern 1: Proper case name (e.g., "Kritensh Kumar")
+    if (/^[A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,3}$/.test(line) && line.length < 50) {
+      console.log(`Found name pattern 1: "${line}"`);
+      return line;
+    }
+    
+    // Pattern 2: All caps name (e.g., "STEVEN SORICILLO")
+    if (/^[A-Z]+(?:\s+[A-Z]+){1,3}$/.test(line) && 
+        !['LINKEDIN', 'PROFILE', 'EMAIL', 'PHONE', 'ADDRESS', 'RESUME', 'CURRICULUM', 'VITAE', 'CONTACT', 'INFORMATION', 'BUSINESS', 'DEVELOPMENT', 'PROFESSIONAL', 'EXPERIENCE', 'OBJECTIVE', 'SUMMARY', 'SKILLS', 'EDUCATION'].some(word => 
+          line.includes(word))) {
+      console.log(`Found name pattern 2: "${line}"`);
+      return line.toLowerCase().replace(/\b\w/g, l => l.toUpperCase());
+    }
+  }
+  
+  // Strategy 2: Extract from email
+  const emailMatch = text.match(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/);
+  if (emailMatch) {
+    const emailName = emailMatch[0].split('@')[0];
+    if (emailName && emailName.length > 2) {
+      console.log(`Extracted name from email: "${emailName}"`);
+      return emailName.replace(/[._-]/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+    }
+  }
+  
+  // Strategy 3: Look for common names
+  const commonNames = ['Kritensh', 'Steven', 'John', 'Sarah', 'Michael', 'David', 'Lisa', 'Robert', 'Jennifer', 'William'];
+  for (const name of commonNames) {
+    const namePattern = new RegExp(`\\b${name}\\b`, 'i');
+    if (namePattern.test(text.substring(0, 500))) {
+      console.log(`Found common name: "${name}"`);
+      return name;
+    }
+  }
+  
+  console.log('No name found');
+  return '';
+};
+
+// Extract location
+const extractLocation = (text) => {
   const locationPatterns = [
     /([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*,\s*[A-Z]{2}\s*\d{5})/,
     /([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*,\s*[A-Z]{2})/,
+    /([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*,\s*[A-Z][a-z]+)/i,
     /([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*\s+City)/i,
-    /([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*,\s*[A-Z][a-z]+)/i
+    /(India|United States|USA|Canada|United Kingdom|UK|Australia|Germany|France|Japan|China|Brazil|Mexico)/i
   ];
   
   for (const pattern of locationPatterns) {
     const match = text.match(pattern);
     if (match && match[1]) {
-      location = match[1].trim();
-      if (!['Email', 'Phone', 'LinkedIn', 'Profile'].some(word => 
+      const location = match[1].trim();
+      if (!['Email', 'Phone', 'LinkedIn', 'Profile', 'Skills', 'Experience'].some(word => 
         location.toLowerCase().includes(word.toLowerCase()))) {
-        break;
+        return location;
       }
     }
   }
+  return '';
+};
 
-  // Enhanced experience extraction
-  let experience = '';
+// Extract experience
+const extractExperience = (text) => {
   const experienceSectionPatterns = [
-    /(?:PROFESSIONAL EXPERIENCE|Professional Experience|Experience|Work History|Employment|Work Experience)[:\s]*(.+?)(?=Education|Skills|Projects|Languages|Certifications|$)/is,
-    /Professional[:\s]*(.+?)(?=Education|Skills|Projects|Languages|Certifications|$)/is,
-    /Career[:\s]*(.+?)(?=Education|Skills|Projects|Languages|Certifications|$)/is,
-    /Employment[:\s]*(.+?)(?=Education|Skills|Projects|Languages|Certifications|$)/is
+    /(?:PROFESSIONAL EXPERIENCE|Professional Experience|Experience|Work History|Employment|Work Experience|Career|Employment History|Professional Background)[:\s]*(.+?)(?=Education|Skills|Projects|Languages|Certifications|References|$)/is,
+    /(?:EXPERIENCE|Experience)[:\s]*(.+?)(?=Education|Skills|Projects|Languages|Certifications|References|$)/is,
+    /(?:WORK EXPERIENCE|Work Experience)[:\s]*(.+?)(?=Education|Skills|Projects|Languages|Certifications|References|$)/is,
+    /(?:EMPLOYMENT|Employment)[:\s]*(.+?)(?=Education|Skills|Projects|Languages|Certifications|References|$)/is,
+    /(?:CAREER|Career)[:\s]*(.+?)(?=Education|Skills|Projects|Languages|Certifications|References|$)/is
   ];
   
   for (const pattern of experienceSectionPatterns) {
     const match = text.match(pattern);
     if (match && match[1]) {
-      experience = match[1].trim().split('\n').slice(0, 20).join(' '); // Take first 20 lines
-      break;
+      return match[1].trim().split('\n').slice(0, 30).join(' '); // Take first 30 lines
     }
   }
+  
+  // If no experience section found, look for job titles in the text
+  const jobTitlePatterns = [
+    /(?:Backend Developer|Frontend Developer|Full Stack Developer|Software Developer|Web Developer|Machine Learning|Data Scientist|Business Development Manager|Account Executive|Manager|Director|Senior|Lead|Principal|Engineer|Analyst|Consultant|Specialist)[^,\n]*(?:\n[^,\n]*){0,5}/gi
+  ];
+  
+  for (const pattern of jobTitlePatterns) {
+    const matches = text.match(pattern);
+    if (matches && matches.length > 0) {
+      return matches.slice(0, 5).join('\n'); // Take first 5 job entries
+    }
+  }
+  
+  return '';
+};
 
-  // Enhanced skills extraction
+// Extract skills
+const extractSkills = (text) => {
   const skillCategories = {
-    technical: [
-      'JavaScript', 'Python', 'Java', 'React', 'Node.js', 'SQL', 'MongoDB', 'PostgreSQL',
-      'AWS', 'Docker', 'Git', 'HTML', 'CSS', 'TypeScript', 'Angular', 'Vue', 'Express',
-      'Django', 'Flask', 'Spring', 'Redis', 'Kubernetes', 'Linux', 'Machine Learning', 'AI',
-      'PHP', 'C++', 'C#', '.NET', 'Ruby', 'Go', 'Swift', 'Kotlin', 'R', 'MATLAB'
+    programming: [
+      'JavaScript', 'Python', 'Java', 'C++', 'C#', 'PHP', 'Ruby', 'Go', 'Swift', 'Kotlin', 'R', 'MATLAB', 'Scala', 'Rust', 'TypeScript', 'Dart', 'Perl', 'Lua', 'Haskell', 'Clojure'
     ],
-    sales: [
-      'Sales', 'Business Development', 'Account Management', 'Customer Relations',
-      'Lead Generation', 'CRM', 'Salesforce', 'HubSpot', 'Cold Calling', 'Negotiation',
-      'Presentation', 'Public Speaking', 'Market Research', 'Client Acquisition',
-      'Revenue Generation', 'Pipeline Management', 'Territory Management',
-      'Key Account Management', 'Revenue Growth', 'Market Analysis', 'Import/Export Sales',
-      'Strategic Growth Planning', 'Partnership Development', 'Pricing Negotiations',
-      'Contract Negotiations', 'Problem Resolution'
+    web: [
+      'HTML', 'CSS', 'React', 'Angular', 'Vue', 'Node.js', 'Express', 'Django', 'Flask', 'Spring', 'Laravel', 'Rails', 'FastAPI', 'Next.js', 'Nuxt.js', 'Svelte', 'Ember', 'jQuery', 'Bootstrap', 'Tailwind'
     ],
-    logistics: [
-      'Logistics', 'Supply Chain', 'Freight Forwarding', 'International Trade',
-      'Transportation', 'Warehousing', 'Inventory Management', 'Customs',
-      'Import/Export', 'Ocean Freight', 'Air Freight', 'Trucking', 'Rail',
-      'Third-Party Logistics', '3PL', '4PL', 'Transpacific', 'Transatlantic',
-      'Trade Lanes', 'Commodities', 'Steel', 'Machinery', 'Textiles', 'Tiles',
-      'Port Operations', 'Shipping', 'Distribution', 'Procurement', 'Customs Clearance Sales'
+    database: [
+      'SQL', 'MySQL', 'PostgreSQL', 'MongoDB', 'Redis', 'Elasticsearch', 'Cassandra', 'DynamoDB', 'SQLite', 'Oracle', 'SQL Server', 'MariaDB', 'CouchDB', 'Neo4j', 'InfluxDB'
     ],
-    general: [
-      'Project Management', 'Agile', 'Scrum', 'Leadership', 'Team Management',
-      'Communication', 'Analytical', 'Problem Solving', 'Microsoft Office',
-      'Excel', 'PowerPoint', 'Word', 'Outlook', 'Time Management', 'Management',
-      'International Sales Marketing', 'Strategic Growth Planning', 'Partnership Development'
+    cloud: [
+      'AWS', 'Azure', 'Google Cloud', 'Heroku', 'DigitalOcean', 'Linode', 'Vercel', 'Netlify', 'Firebase', 'Supabase', 'Cloudflare', 'Docker', 'Kubernetes', 'Terraform', 'Ansible'
+    ],
+    tools: [
+      'Git', 'GitHub', 'GitLab', 'Jenkins', 'CI/CD', 'Jira', 'Confluence', 'Slack', 'Trello', 'Figma', 'VS Code', 'IntelliJ', 'Eclipse', 'Postman', 'Swagger', 'Docker', 'Kubernetes'
+    ],
+    data: [
+      'Machine Learning', 'AI', 'Data Science', 'Analytics', 'Statistics', 'Pandas', 'NumPy', 'TensorFlow', 'PyTorch', 'Scikit-learn', 'Keras', 'OpenCV', 'NLTK', 'SpaCy'
+    ],
+    business: [
+      'Sales', 'Business Development', 'Account Management', 'Customer Relations', 'Lead Generation', 'CRM', 'Salesforce', 'HubSpot', 'Marketing', 'Project Management', 'Agile', 'Scrum'
+    ],
+    soft: [
+      'Communication', 'Leadership', 'Team Management', 'Problem Solving', 'Analytical', 'Time Management', 'Presentation', 'Public Speaking', 'Negotiation', 'Customer Service', 'Collaboration'
     ]
   };
   
@@ -270,80 +498,42 @@ const parseWithEnhancedFallback = (text) => {
     new RegExp(`\\b${skill.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i').test(text)
   );
 
-  // Extract areas of expertise
-  let areasOfExpertise = '';
-  const expertisePatterns = [
-    /(?:AREAS OF EXPERTISE|Areas of Expertise|Expertise|Skills|Key Skills)[:\s]*(.+?)(?=Experience|Work|Professional|Employment|Education|$)/is
-  ];
-  
-  for (const pattern of expertisePatterns) {
-    const match = text.match(pattern);
-    if (match && match[1]) {
-      areasOfExpertise = match[1].trim().split('\n').slice(0, 10).join(' '); // Take first 10 lines
-      break;
-    }
-  }
+  return foundSkills.join(', ');
+};
 
   // Extract summary
-  let summary = '';
+const extractSummary = (text) => {
   const summaryPatterns = [
-    /(?:Summary|Objective|Profile|About)[:\s]*(.+?)(?=Experience|Work|Skills|Professional|Employment|Education|$)/is,
+    /(?:SUMMARY|Summary|PROFILE|Profile|OBJECTIVE|Objective|ABOUT|About|PROFESSIONAL SUMMARY|Professional Summary)[:\s]*(.+?)(?=Experience|Work|Skills|Professional|Employment|Education|$)/is,
     /(?:BUSINESS DEVELOPMENT|Business Development)[:\s]*(.+?)(?=AREAS OF EXPERTISE|Experience|Work|Skills|Professional|Employment|Education|$)/is
   ];
   
   for (const pattern of summaryPatterns) {
     const match = text.match(pattern);
     if (match && match[1]) {
-      summary = match[1].trim().split('\n').slice(0, 5).join(' '); // Take first 5 lines
-      break;
+      return match[1].trim().split('\n').slice(0, 5).join(' '); // Take first 5 lines
     }
   }
-
-  // Extract qualifications
-  let qualifications = '';
-  const qualificationsPatterns = [
-    /(?:HIGHLIGHTED QUALIFICATIONS|Highlighted Qualifications|Qualifications|Key Qualifications)[:\s]*(.+?)(?=Experience|Work|Professional|Employment|Education|$)/is
-  ];
-  
-  for (const pattern of qualificationsPatterns) {
-    const match = text.match(pattern);
-    if (match && match[1]) {
-      qualifications = match[1].trim().split('\n').slice(0, 8).join(' '); // Take first 8 lines
-      break;
-    }
-  }
-
-  // Extract languages
-  let languages = '';
-  const languagePatterns = [
-    /(?:Languages|Language|Fluent)[:\s]*([^,\n]+)/i,
-    /(?:Fluent in|Speaks)[:\s]*([^,\n]+)/i
-  ];
-  
-  for (const pattern of languagePatterns) {
-    const match = text.match(pattern);
-    if (match && match[1]) {
-      languages = match[1].trim();
-      break;
-    }
-  }
+  return '';
+};
 
   // Extract current job title
-  let currentJobTitle = '';
+const extractCurrentJobTitle = (text) => {
   const jobTitlePatterns = [
-    /(?:Business Development Manager|Account Executive|Manager|Director|Senior|Lead|Principal)[^,\n]*/i
+    /(?:Backend Developer|Frontend Developer|Full Stack Developer|Software Developer|Web Developer|Data Scientist|Machine Learning Engineer|Business Development Manager|Account Executive|Manager|Director|Senior|Lead|Principal|Engineer|Analyst|Consultant|Specialist)[^,\n]*/i
   ];
   
   for (const pattern of jobTitlePatterns) {
     const match = text.match(pattern);
     if (match && match[0]) {
-      currentJobTitle = match[0].trim();
-      break;
+      return match[0].trim();
     }
   }
+  return '';
+};
 
   // Extract years of experience
-  let yearsOfExperience = '';
+const extractYearsOfExperience = (text) => {
   const experienceYearsPatterns = [
     /(\d+)\+?\s*(?:years?|yrs?)\s*(?:of\s*)?(?:experience|exp)/i,
     /(?:experience|exp)[:\s]*(\d+)\+?\s*(?:years?|yrs?)/i
@@ -352,62 +542,34 @@ const parseWithEnhancedFallback = (text) => {
   for (const pattern of experienceYearsPatterns) {
     const match = text.match(pattern);
     if (match && match[1]) {
-      yearsOfExperience = match[1] + ' years';
-      break;
+      return match[1] + ' years';
     }
   }
+  return '';
+};
 
-  // Extract LinkedIn URL
-  const linkedinMatch = text.match(/linkedin\.com\/in\/[a-zA-Z0-9\-_]+/i);
-  const linkedinUrl = linkedinMatch ? `https://${linkedinMatch[0]}` : '';
-
-  // Extract salary expectations
-  let expectedSalary = '';
-  const salaryPatterns = [
-    /Expected Salary[:\s]*([^,\n]+)/i,
-    /Salary[:\s]*([^,\n]+)/i,
-    /Compensation[:\s]*([^,\n]+)/i,
-    /(\$[\d,]+(?:\s*-\s*\$[\d,]+)?(?:\s*(?:per year|annually|annual|yearly))?)/i
-  ];
-  
-  for (const pattern of salaryPatterns) {
-    const match = text.match(pattern);
-    if (match && match[1]) {
-      expectedSalary = match[1].trim();
-      break;
-    }
-  }
-
-  // Enhance experience with summary and qualifications if available
-  let enhancedExperience = experience;
-  if (summary) {
-    enhancedExperience = `SUMMARY: ${summary}\n\nEXPERIENCE:\n${experience}`;
-  }
-  if (qualifications) {
-    enhancedExperience += `\n\nQUALIFICATIONS:\n${qualifications}`;
-  }
-  if (areasOfExpertise) {
-    enhancedExperience += `\n\nAREAS OF EXPERTISE:\n${areasOfExpertise}`;
-  }
-
+// Fallback data when parsing fails
+const getFallbackData = () => {
+  console.log('Using fallback data...');
   return {
-    name: name.trim(),
-    email: email.trim(),
-    phone: phone.trim(),
-    skills: foundSkills.join(', '),
+    name: '',
+    email: '',
+    phone: '',
+    skills: '',
     education: '',
-    experience: enhancedExperience,
-    location: location.trim(),
-    linkedinUrl: linkedinUrl.trim(),
-    expectedSalary: expectedSalary.trim(),
-    summary: summary,
-    areasOfExpertise: areasOfExpertise,
-    qualifications: qualifications,
-    languages: languages,
-    currentJobTitle: currentJobTitle,
-    yearsOfExperience: yearsOfExperience,
-    resumeText: text
+    experience: '',
+    location: '',
+    linkedinUrl: '',
+    expectedSalary: '',
+    summary: '',
+    areasOfExpertise: '',
+    qualifications: '',
+    languages: '',
+    currentJobTitle: '',
+    yearsOfExperience: '',
+    resumeText: '',
+    parsingMethod: 'Fallback'
   };
 };
 
-export { parseResumeRobust, parseStevenResume };
+export { parseResumeRobust };

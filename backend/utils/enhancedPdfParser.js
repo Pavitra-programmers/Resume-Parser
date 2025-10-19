@@ -1,16 +1,16 @@
-import { createRequire } from 'module';
-const require = createRequire(import.meta.url);
-
+import * as pdf from 'pdf-parse';
 import fs from 'fs';
 import OpenAI from 'openai';
-const pdf = require('pdf-parse');
+import dotenv from 'dotenv';
 
+// Load environment variables
+dotenv.config();
 
 // Initialize OpenAI client
 let openai = null;
-if (process.env.OPENAI_API_KEY) {
+if (process.env.OPEN_AI_KEY) {
   openai = new OpenAI({
-    apiKey: process.env.OPENAI_API_KEY
+    apiKey: process.env.OPEN_AI_KEY
   });
   console.log('OpenAI client initialized');
 } else {
@@ -24,8 +24,11 @@ const parseResumeEnhanced = async (pdfPath) => {
     
     // First, try to extract text from PDF
     const dataBuffer = fs.readFileSync(pdfPath);
-    const pdfData = await pdf(dataBuffer);
-    const extractedText = pdfData.text;
+    const pdfData = await new pdf.PDFParse(dataBuffer);
+    console.log('PDF Data structure:', Object.keys(pdfData));
+    console.log('PDF Data text property:', typeof pdfData.text);
+    
+    const extractedText = pdfData.text || '';
     
     console.log('Extracted text length:', extractedText.length);
     

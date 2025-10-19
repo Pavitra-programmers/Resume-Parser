@@ -1,10 +1,14 @@
 import Airtable from "airtable";
+import dotenv from 'dotenv';
+
+// Load environment variables
+dotenv.config();
 
 // Initialize Airtable only if API key is available
 let base = null;
-if (process.env.AIRTABLE_KEY && process.env.BASE_ID) {
+if (process.env.AIRTABEL_KEY && process.env.BASE_ID) {
   base = new Airtable({ 
-    apiKey: process.env.AIRTABLE_KEY
+    apiKey: process.env.AIRTABEL_KEY
   }).base(process.env.BASE_ID);
 } else {
   console.warn('Airtable API key or Base ID not found. Airtable functionality will be disabled.');

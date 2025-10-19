@@ -12,7 +12,7 @@ const __dirname = path.dirname(__filename);
 
 // Initialize OpenAI client
 const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY
+    apiKey: process.env.OPEN_AI_KEY
 });
 
 // Convert PDF to images using pdf-poppler
