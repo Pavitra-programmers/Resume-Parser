@@ -21,10 +21,7 @@ app.use(express.static(path.join(__dirname, '../frontend/build')));
 // Routes
 app.use("/api/resume", resumeRoutes);
 
-// Serve React app for any non-API routes
-app.get('*', (req, res) => {
-  res.sendFile(path.join(__dirname, '../frontend/build', 'index.html'));
-});
+// API-only server - frontend runs separately
 
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);

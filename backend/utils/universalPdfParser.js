@@ -443,9 +443,9 @@ const parseResumeUniversally = async (pdfPath) => {
     
     // Fallback to text-based parsing
     try {
-      const pdfParse = await import('pdf-parse');
+      const pdfParse = require('pdf-parse');
       const dataBuffer = fs.readFileSync(pdfPath);
-      const pdfData = await pdfParse.default(dataBuffer);
+      const pdfData = await pdfParse(dataBuffer);
       const extractedText = pdfData.text;
       
       if (extractedText && extractedText.trim().length > 50) {

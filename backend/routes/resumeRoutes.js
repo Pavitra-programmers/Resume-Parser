@@ -1,11 +1,15 @@
 import express from "express";
 import multer from "multer";
-import pdf from "pdf-parse";
-import fs from "fs";
-import path from "path";
+import { createRequire } from 'module';
+const require = createRequire(import.meta.url);
+
+import fs from 'fs';
+import OpenAI from 'openai';
+const pdf = require('pdf-parse');
+import path from 'path';
 import { fileURLToPath } from "url";
 import { addCandidate, getCandidate, getAllCandidates, updateCandidate } from "../utils/airtableClient.js";
-import { parseResumeUniversally } from "../utils/universalPdfParser.js";
+import { parseResumeEnhanced } from "../utils/enhancedPdfParser.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -418,16 +422,16 @@ router.post("/upload", upload.single("resume"), async (req, res) => {
     let parsingMethod = '';
 
     try {
-      console.log('Attempting universal resume parsing...');
+      console.log('Attempting enhanced resume parsing...');
       
-      // Use the universal parser that works with any resume format
-      parsedData = await parseResumeUniversally(filePath);
-      parsingMethod = 'Universal Parser';
-      console.log('Universal parsing successful:', parsedData);
+      // Use the enhanced parser with AI capabilities
+      parsedData = await parseResumeEnhanced(filePath);
+      parsingMethod = 'Enhanced Parser';
+      console.log('Enhanced parsing successful:', parsedData);
       
-    } catch (universalError) {
-      console.error('Universal parsing failed:', universalError);
-      throw new Error('Failed to parse resume with universal parser');
+    } catch (enhancedError) {
+      console.error('Enhanced parsing failed:', enhancedError);
+      throw new Error('Failed to parse resume with enhanced parser');
     }
     
     // Extract numeric value from salary for Expected Salary field (Number type)

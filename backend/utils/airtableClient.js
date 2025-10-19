@@ -1,11 +1,21 @@
 import Airtable from "airtable";
 
-const base = new Airtable({ 
-  apiKey: process.env.AIRTABEL_KEY
-}).base(process.env.BASE_ID);
+// Initialize Airtable only if API key is available
+let base = null;
+if (process.env.AIRTABLE_KEY && process.env.BASE_ID) {
+  base = new Airtable({ 
+    apiKey: process.env.AIRTABLE_KEY
+  }).base(process.env.BASE_ID);
+} else {
+  console.warn('Airtable API key or Base ID not found. Airtable functionality will be disabled.');
+}
 
 export const addCandidate = async (fields) => {
   try {
+    if (!base) {
+      console.log('Airtable not configured, returning mock data');
+      return { id: 'mock_' + Date.now(), fields };
+    }
     const records = await base("Candidates").create([{ fields }]);
     return records[0];
   } catch (error) {
@@ -16,6 +26,10 @@ export const addCandidate = async (fields) => {
 
 export const getCandidate = async (id) => {
   try {
+    if (!base) {
+      console.log('Airtable not configured, returning mock data');
+      return { Name: 'Mock Candidate', Email: 'mock@example.com' };
+    }
     const record = await base("Candidates").find(id);
     return record.fields;
   } catch (error) {
@@ -26,6 +40,10 @@ export const getCandidate = async (id) => {
 
 export const getAllCandidates = async () => {
   try {
+    if (!base) {
+      console.log('Airtable not configured, returning mock data');
+      return [{ id: 'mock_1', Name: 'Mock Candidate', Email: 'mock@example.com' }];
+    }
     const records = await base("Candidates").select().all();
     return records.map(record => ({
       id: record.id,
@@ -39,6 +57,10 @@ export const getAllCandidates = async () => {
 
 export const updateCandidate = async (id, fields) => {
   try {
+    if (!base) {
+      console.log('Airtable not configured, returning mock data');
+      return fields;
+    }
     const record = await base("Candidates").update(id, fields);
     return record.fields;
   } catch (error) {

@@ -230,11 +230,11 @@ const ProfileView: React.FC = () => {
             {/* Tab Content */}
             {activeTab === 'overview' && (
               <>
-                {/* Sales Summary */}
+                {/* Professional Summary */}
                 <div className="bg-white rounded-lg shadow-sm p-6 mb-6">
                   <div className="flex items-center mb-4">
                     <FaUser className="h-5 w-5 text-blue-600 mr-2" />
-                    <h2 className="text-lg font-semibold text-gray-900">Sales Summary</h2>
+                    <h2 className="text-lg font-semibold text-gray-900">Professional Summary</h2>
                   </div>
                   <p className="text-sm text-gray-600 mb-2">Professional overview and achievements</p>
                   <p className="text-gray-700">
@@ -242,11 +242,11 @@ const ProfileView: React.FC = () => {
                   </p>
                 </div>
 
-                {/* Sales Performance Grid */}
+                {/* Professional Details Grid */}
                 <div className="bg-white rounded-lg shadow-sm p-6 mb-6">
                   <div className="flex items-center mb-4">
                     <FaBullseye className="h-5 w-5 text-blue-600 mr-2" />
-                    <h2 className="text-lg font-semibold text-gray-900">Sales Performance</h2>
+                    <h2 className="text-lg font-semibold text-gray-900">Professional Details</h2>
                   </div>
                   <p className="text-sm text-gray-600 mb-4">Key metrics and specializations</p>
                   <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
@@ -313,11 +313,11 @@ const ProfileView: React.FC = () => {
                   </div>
                 </div>
 
-                {/* Career Expectations */}
+                {/* Career Preferences */}
                 <div className="bg-white rounded-lg shadow-sm p-6">
                   <div className="flex items-center mb-4">
                     <FaChartLine className="h-5 w-5 text-blue-600 mr-2" />
-                    <h2 className="text-lg font-semibold text-gray-900">Career Expectations</h2>
+                    <h2 className="text-lg font-semibold text-gray-900">Career Preferences</h2>
                   </div>
                   <p className="text-sm text-gray-600 mb-4">Salary expectations and preferences</p>
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -325,7 +325,7 @@ const ProfileView: React.FC = () => {
                       <FaDollarSign className="h-4 w-4 text-blue-600 mr-2" />
                       <div>
                         <div className="text-xs text-gray-600">Salary Range</div>
-                        <div className="text-sm font-medium">{candidate["Expected Salary"] || "$85,000 MINIMUM"}</div>
+                        <div className="text-sm font-medium">{candidate["Expected Salary"] || "Not specified"}</div>
                       </div>
                     </div>
                     <div className="flex items-center">
@@ -342,7 +342,7 @@ const ProfileView: React.FC = () => {
                       <FaHeart className="h-4 w-4 text-blue-600 mr-2" />
                       <div>
                         <div className="text-xs text-gray-600">Preferences</div>
-                        <div className="text-sm font-medium">{candidate["Preferred Role"] || "Remote, Account Executive"}</div>
+                        <div className="text-sm font-medium">{candidate["Preferred Role"] || "Not specified"}</div>
                       </div>
                     </div>
                   </div>
