@@ -1,5 +1,5 @@
 import OpenAI from 'openai';
-import pdf from 'pdf-poppler';
+import pdf2pic from 'pdf2pic';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -15,37 +15,61 @@ const openai = new OpenAI({
     apiKey: process.env.OPEN_AI_KEY
 });
 
-// Convert PDF to images using pdf-poppler
+// Convert PDF to images using pdf2pic
 const convertPdfToImages = async (pdfPath) => {
   try {
-    const options = {
+    const tempDir = path.join(__dirname, '../temp');
+    
+    // Ensure temp directory exists
+    if (!fs.existsSync(tempDir)) {
+      fs.mkdirSync(tempDir, { recursive: true });
+    }
+    
+    // Clean up any existing temp files first
+    const existingFiles = fs.readdirSync(tempDir);
+    existingFiles.forEach(file => {
+      if (file.startsWith('page') && file.endsWith('.png')) {
+        fs.unlinkSync(path.join(tempDir, file));
+      }
+    });
+    
+    const convert = pdf2pic.fromPath(pdfPath, {
+      density: 300, // High DPI for better OCR
+      saveFilename: 'page',
+      savePath: tempDir,
       format: 'png',
-      out_dir: path.join(__dirname, '../temp'),
-      out_prefix: 'page',
-      page: null // Convert all pages
-    };
-
-    console.log('Converting PDF to images with pdf-poppler...');
-    const results = await pdf.convert(pdfPath, options);
+      width: 2000, // High resolution
+      height: 2600
+    });
+    
+    console.log('Converting PDF to images with pdf2pic...');
+    const results = await convert.bulk(-1); // Convert all pages
     
     if (!results || results.length === 0) {
       throw new Error('No images generated from PDF');
     }
-
+    
     console.log(`Generated ${results.length} images`);
     
     // Read the generated images and convert to base64
     const images = [];
     for (let i = 0; i < results.length; i++) {
-      const imagePath = path.join(__dirname, '../temp', `page-${i + 1}.png`);
+      const imagePath = path.join(tempDir, `page.${i + 1}.png`);
       if (fs.existsSync(imagePath)) {
         const imageBuffer = fs.readFileSync(imagePath);
         const base64 = imageBuffer.toString('base64');
         images.push(base64);
+        console.log(`Loaded image ${i + 1}: ${imageBuffer.length} bytes`);
         
         // Clean up the image file immediately
         fs.unlinkSync(imagePath);
+      } else {
+        console.log(`Image file not found: ${imagePath}`);
       }
+    }
+    
+    if (images.length === 0) {
+      throw new Error('No images could be loaded');
     }
     
     return images;

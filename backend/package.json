@@ -15,6 +15,7 @@
     "pdf-parse": "^2.4.3",
     "pdf-poppler": "^0.2.3",
     "pdf2pic": "^3.2.0",
-    "pdfjs-dist": "^5.4.296"
+    "pdfjs-dist": "^5.4.296",
+    "tesseract.js": "^6.0.1"
   }
 }

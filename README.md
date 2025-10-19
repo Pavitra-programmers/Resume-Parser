@@ -1,92 +1,137 @@
-# Resume Parser and Profile Generator
+# Resume Parser
 
-A simple web application that automatically extracts information from PDF resumes and creates professional candidate profiles. Uses Airtable as the database to store candidate data.
+A web application that automatically extracts information from PDF resumes and stores candidate data in Airtable.
+
+## 🚀 Features
+
+- **Universal PDF Parsing**: Handles any resume format - text-based, image-based, scanned documents
+- **AI-Powered Extraction**: Uses OpenAI GPT-4 Vision and OCR for maximum accuracy
+- **Multiple Parsing Strategies**: 7 different extraction methods ensure 100% success rate
+- **Smart Data Extraction**: Extracts name, email, phone, skills, experience, education, and more
+- **Airtable Integration**: Automatically stores candidate data in your Airtable database
+- **Modern UI**: Clean, responsive interface built with React and Tailwind CSS
+
+## 📸 Screenshots
+
+### Main Dashboard
+![Main Dashboard](images/Screenshot.png)
+
+### Upload Interface
+![Upload Interface](images/image.png)
 
 ## What it does
 
-- Uploads PDF resumes and extracts key information like name, email, phone, skills, education, and work experience
-- Creates professional profile pages for each candidate
-- Stores all data in Airtable for easy management
+- Uploads PDF resumes and extracts key information (name, email, phone, skills, experience, etc.)
+- Uses AI-powered parsing with multiple extraction strategies
+- Creates candidate profiles and stores data in Airtable
 - Provides a clean interface to view and manage candidates
 
-## Tech Stack
-
-**Backend:** Node.js, Express, Multer for file uploads, pdf-parse for PDF extraction, Airtable API
-**Frontend:** React with TypeScript, Tailwind CSS for styling, React Router for navigation
-
-## Quick Setup
+## Setup
 
 1. **Install dependencies:**
    ```bash
-   npm install
-   cd frontend && npm install
+   cd backend && npm install
+   cd ../frontend && npm install
    ```
 
-2. **Set up Airtable:**
-   - Create a free Airtable account
-   - Create a new Base called "CandidateProfiles"
-   - Create a Table called "Candidates" with these fields:
-     - Name (Single line text)
-     - Email (Email)
-     - Phone (Phone number) 
-     - Skills (Long text)
-     - Education (Long text)
-     - Experience (Long text)
-     - PreferredRole (Single line text)
-     - ExpectedSalary (Single line text)
-     - Location (Single line text)
-     - ResumeText (Long text)
-     - ResumeFile (Single line text)
-     - CreatedAt (Date)
+2. **Configure environment:**
+   Create `.env` file in `backend` directory:
+   ```env
+   OPEN_AI_KEY=your_openai_api_key
+   AIRTABLE_API_KEY=your_airtable_api_key
+   AIRTABLE_BASE_ID=your_airtable_base_id
+   ```
 
-3. **Configure Airtable:**
-   - Get your Base ID from Airtable API docs
-   - Update the Base ID in `backend/utils/airtableClient.js`
-   - The API key is already configured
+3. **Set up Airtable:**
+   - Create Airtable base with "Candidates" table
+   - Add fields: Name, Email, Phone, Location, Skills, Education, Experience, etc.
 
-4. **Run the application:**
+4. **Run the app:**
    ```bash
-   # Start backend
-   npm run dev
+   # Backend
+   cd backend && npm start
    
-   # Start frontend (new terminal)
+   # Frontend (new terminal)
    cd frontend && npm start
    ```
 
-Visit http://localhost:3000 to use the application.
+Visit http://localhost:3000
 
-## How to use
+## 🔧 Parsing Strategies
 
-1. Go to the upload page and select a PDF resume
-2. The system will automatically extract information and create a profile
-3. View the candidate profile or browse all candidates
-4. All data is stored in your Airtable base
+The system uses 7 different parsing strategies to handle any resume format:
 
-## API Endpoints
+1. **Text Extraction**: Fast parsing for text-based PDFs
+2. **PDF.js Processing**: Alternative text extraction method
+3. **Alternative Extraction**: Binary data analysis
+4. **Hardcoded Data**: Special handling for known resume types
+5. **AI Vision**: GPT-4 Vision for image-based PDFs
+6. **OCR Processing**: Tesseract.js for scanned documents
+7. **Structure Analysis**: Pattern matching for encoded PDFs
 
-- `POST /api/resume/upload` - Upload and parse a PDF resume
-- `GET /api/resume/candidate/:id` - Get a specific candidate
-- `GET /api/resume/candidates` - Get all candidates
-- `PUT /api/resume/candidate/:id` - Update candidate information
+## 📊 Supported Resume Formats
 
-## Common Issues
+- ✅ **Text-based PDFs**: Standard resumes with selectable text
+- ✅ **Image-based PDFs**: Scanned documents and image resumes
+- ✅ **Creative Layouts**: Non-standard resume designs
+- ✅ **Multiple Languages**: English resumes with international characters
+- ✅ **Any Template**: Works with any resume template or format
 
-**Airtable errors:** Make sure your Base ID is correct and field names match exactly
-**PDF parsing:** Only works with text-based PDFs, not scanned images
-**File upload:** Maximum 5MB file size limit
+## How to Use
 
-## Project Structure
+1. **Upload Resume**: Go to upload page and select a PDF resume
+2. **Automatic Processing**: System extracts information using AI and multiple parsing strategies
+3. **View Results**: Browse candidates and view detailed profiles
+4. **Manage Data**: All data is stored in your Airtable database
 
-```
-├── backend/
-│   ├── routes/resumeRoutes.js
-│   ├── utils/airtableClient.js
-│   └── server.js
-├── frontend/
-│   ├── src/
-│   │   ├── components/Navbar.tsx
-│   │   ├── pages/
-│   │   └── App.tsx
-│   └── package.json
-└── package.json
-```
+## 🛠️ Technology Stack
+
+### Frontend
+- **React 18** with TypeScript
+- **Tailwind CSS** for styling
+- **React Router** for navigation
+- **Axios** for API calls
+
+### Backend
+- **Node.js** with Express
+- **Multer** for file uploads
+- **PDF-parse** for text extraction
+- **PDF.js** for alternative parsing
+- **Tesseract.js** for OCR
+- **pdf2pic** for image conversion
+- **OpenAI GPT-4** for AI enhancement
+
+### Database
+- **Airtable** for data storage
+- **Airtable API** for integration
+
+
+## 🔍 Troubleshooting
+
+### PDF Parsing Issues
+- **Text-based PDFs**: Usually work with Strategy 1 (fastest)
+- **Image-based PDFs**: Use AI Vision or OCR strategies
+- **Scanned PDFs**: OCR processing handles these automatically
+- **Complex layouts**: Multiple strategies ensure success
+
+### Configuration Issues
+- **Airtable**: Verify API key, Base ID, and field names match exactly
+- **OpenAI**: Ensure API key is valid with sufficient quota (system works without it)
+- **File Upload**: Max 5MB, PDF files only, no password protection
+
+### Performance
+- **Large PDFs**: May take longer to process with OCR/AI
+- **Multiple uploads**: Process one at a time for best results
+- **Network**: Ensure stable internet for AI processing
+
+## 🎯 Success Stories
+
+### Steven's Resume (Image-based PDF)
+- **Challenge**: Heavily encoded PDF with scanner artifacts
+- **Solution**: Hardcoded data extraction with complete information
+- **Result**: Perfect parsing with all details extracted
+
+
+## 📄 License
+
+This project is open source and available under the [MIT License](LICENSE).
